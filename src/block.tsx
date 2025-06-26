@@ -10,6 +10,9 @@ interface BlockProps {
   description?: string;
 }
 
+// Modes de jeu pour la révision
+type GameMode = 'discovery' | 'revision' | 'exam' | 'challenge';
+
 const Block: React.FC<BlockProps> = ({ title, description }) => {
   // Game state
   const [gameState, setGameState] = useState<GameState>({
@@ -34,23 +37,35 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   const [showQuiz, setShowQuiz] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+  const [gameMode, setGameMode] = useState<GameMode>('discovery');
+  const [showModeSelector, setShowModeSelector] = useState(false);
+
+  // Révision state
+  const [revisionStats, setRevisionStats] = useState<{[key: string]: {
+    attempts: number;
+    bestScore: number;
+    lastScore: number;
+    averageScore: number;
+    weaknesses: string[];
+  }}>({});
 
   // Send completion event for tracking
   const sendCompletionEvent = (completed: boolean, score?: number, maxScore?: number) => {
     const completionData = {
       type: 'BLOCK_COMPLETION',
-      blockId: 'history-game-brevet',
+      blockId: 'history-revision-brevet',
       completed,
       score,
       maxScore,
       data: {
         completedPeriods: gameState.completedPeriods.length,
         totalPeriods: periods.length,
-        averageScore: score || 0
+        averageScore: score || 0,
+        gameMode,
+        totalRevisions: Object.values(revisionStats).reduce((sum, stat) => sum + stat.attempts, 0)
       }
     };
 
-    // Send to both parent and window for compatibility
     window.postMessage(completionData, '*');
     window.parent.postMessage(completionData, '*');
   };
@@ -63,15 +78,31 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       avatarColor: color
     }));
     setShowAvatarCustomization(false);
-    
-    // Send initial engagement event
     sendCompletionEvent(false, 0, 10);
+  };
+
+  // Handle mode selection
+  const handleModeSelect = (mode: GameMode) => {
+    setGameMode(mode);
+    setShowModeSelector(false);
+    
+    // En mode révision, toutes les périodes sont débloquées
+    if (mode === 'revision' || mode === 'exam' || mode === 'challenge') {
+      setPeriods(prev => prev.map(period => ({
+        ...period,
+        unlocked: true
+      })));
+      setGameState(prev => ({
+        ...prev,
+        unlockedPeriods: periods.map(p => p.id)
+      }));
+    }
   };
 
   // Handle period selection
   const handlePeriodClick = (periodId: string) => {
     const period = periods.find(p => p.id === periodId);
-    if (!period || !period.unlocked) return;
+    if (!period || (!period.unlocked && gameMode === 'discovery')) return;
 
     setSelectedPeriod(periodId);
     setGameState(prev => ({ ...prev, currentPeriod: periodId }));
@@ -79,89 +110,109 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   };
 
   // Handle quiz completion
-  const handleQuizComplete = (score: number) => {
+  const handleQuizComplete = (score: number, mistakes: string[] = []) => {
     if (!selectedPeriod) return;
 
-    // Update the completed period
+    // Mettre à jour les stats de révision
+    const currentStats = revisionStats[selectedPeriod] || {
+      attempts: 0,
+      bestScore: 0,
+      lastScore: 0,
+      averageScore: 0,
+      weaknesses: []
+    };
+
+    const newAttempts = currentStats.attempts + 1;
+    const newAverageScore = ((currentStats.averageScore * currentStats.attempts) + score) / newAttempts;
+    
+    const updatedStats = {
+      ...currentStats,
+      attempts: newAttempts,
+      bestScore: Math.max(currentStats.bestScore, score),
+      lastScore: score,
+      averageScore: Math.round(newAverageScore),
+      weaknesses: [...new Set([...currentStats.weaknesses, ...mistakes])]
+    };
+
+    setRevisionStats(prev => ({
+      ...prev,
+      [selectedPeriod]: updatedStats
+    }));
+
+    // Update periods
     const updatedPeriods = periods.map(period => {
       if (period.id === selectedPeriod) {
-        return { ...period, completed: true, score };
+        return { 
+          ...period, 
+          completed: true, 
+          score: gameMode === 'discovery' ? score : Math.max(period.score || 0, score)
+        };
       }
       return period;
     });
 
-    // Unlock next period based on completion order
-    const periodOrder = ['ww1', 'totalitarian', 'ww2', 'coldwar', 'decolonization', 'fifth-republic', 'europe-1989'];
-    const currentIndex = periodOrder.indexOf(selectedPeriod);
-    
-    if (currentIndex >= 0 && currentIndex < periodOrder.length - 1) {
-      const nextPeriodId = periodOrder[currentIndex + 1];
-      updatedPeriods.forEach(period => {
-        if (period.id === nextPeriodId) {
-          period.unlocked = true;
-        }
-      });
+    // En mode découverte, débloquer la période suivante
+    if (gameMode === 'discovery') {
+      const periodOrder = ['ww1', 'totalitarian', 'ww2', 'coldwar', 'decolonization', 'fifth-republic', 'europe-1989'];
+      const currentIndex = periodOrder.indexOf(selectedPeriod);
       
-      setGameState(prev => ({
-        ...prev,
-        unlockedPeriods: [...prev.unlockedPeriods, nextPeriodId]
-      }));
+      if (currentIndex >= 0 && currentIndex < periodOrder.length - 1) {
+        const nextPeriodId = periodOrder[currentIndex + 1];
+        updatedPeriods.forEach(period => {
+          if (period.id === nextPeriodId) {
+            period.unlocked = true;
+          }
+        });
+        
+        setGameState(prev => ({
+          ...prev,
+          unlockedPeriods: [...prev.unlockedPeriods, nextPeriodId]
+        }));
+      }
     }
 
     setPeriods(updatedPeriods);
     
-    // Update game state
     setGameState(prev => ({
       ...prev,
-      completedPeriods: [...prev.completedPeriods, selectedPeriod],
+      completedPeriods: gameMode === 'discovery' && !prev.completedPeriods.includes(selectedPeriod) 
+        ? [...prev.completedPeriods, selectedPeriod]
+        : prev.completedPeriods,
       totalScore: prev.totalScore + score
     }));
 
     setShowQuiz(false);
     setSelectedPeriod(null);
 
-    // Check if all periods are completed
-    const newCompletedCount = gameState.completedPeriods.length + 1;
-    const isFullyCompleted = newCompletedCount === periods.length;
-    
-    // Send completion event
-    const averageScore = (gameState.totalScore + score) / newCompletedCount;
+    const isFullyCompleted = gameMode === 'discovery' && (gameState.completedPeriods.length + 1) === periods.length;
+    const averageScore = (gameState.totalScore + score) / Math.max(gameState.completedPeriods.length + 1, 1);
     sendCompletionEvent(isFullyCompleted, Math.round(averageScore), 10);
-
-    // Show congratulations if all periods completed
-    if (isFullyCompleted) {
-      setTimeout(() => {
-        alert('🎉 Félicitations ! Vous avez terminé toutes les périodes historiques ! Vous êtes prêt pour le Brevet !');
-      }, 500);
-    }
   };
 
-  // Handle quiz close
   const handleQuizClose = () => {
     setShowQuiz(false);
     setSelectedPeriod(null);
     setGameState(prev => ({ ...prev, currentPeriod: null }));
   };
 
-  // Show dashboard
   const handleShowDashboard = () => {
     setShowDashboard(true);
   };
 
-  // Close dashboard
   const handleCloseDashboard = () => {
     setShowDashboard(false);
   };
 
-  // Load saved progress on component mount
+  // Load saved progress
   useEffect(() => {
-    const savedProgress = localStorage.getItem('history-game-progress');
+    const savedProgress = localStorage.getItem('history-revision-progress');
     if (savedProgress) {
       try {
         const parsed = JSON.parse(savedProgress);
-        setGameState(parsed.gameState);
-        setPeriods(parsed.periods);
-        if (parsed.gameState.playerName) {
+        setGameState(parsed.gameState || gameState);
+        setPeriods(parsed.periods || periods);
+        setRevisionStats(parsed.revisionStats || {});
+        if (parsed.gameState?.playerName) {
           setShowAvatarCustomization(false);
         }
       } catch (error) {
@@ -170,24 +221,134 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     }
   }, []);
 
-  // Save progress whenever game state changes
+  // Save progress
   useEffect(() => {
     if (gameState.playerName) {
-      localStorage.setItem('history-game-progress', JSON.stringify({
+      localStorage.setItem('history-revision-progress', JSON.stringify({
         gameState,
-        periods
+        periods,
+        revisionStats
       }));
     }
-  }, [gameState, periods]);
+  }, [gameState, periods, revisionStats]);
 
   // Render avatar customization screen
   if (showAvatarCustomization) {
     return <AvatarCustomization onComplete={handleAvatarComplete} />;
   }
 
+  // Mode selector
+  if (showModeSelector) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        fontFamily: 'Arial, sans-serif'
+      }}>
+        <div style={{
+          background: 'rgba(0, 0, 0, 0.9)',
+          borderRadius: '25px',
+          padding: '50px',
+          maxWidth: '800px',
+          width: '90%',
+          color: 'white'
+        }}>
+          <h2 style={{
+            textAlign: 'center',
+            fontSize: '2.5rem',
+            marginBottom: '30px',
+            background: 'linear-gradient(45deg, #3498db, #e74c3c)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
+          }}>
+            🎯 Choisissez votre mode de révision
+          </h2>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '20px'
+          }}>
+            {[
+              {
+                mode: 'discovery' as GameMode,
+                title: '🌟 Mode Découverte',
+                description: 'Apprenez progressivement, période par période',
+                color: '#3498db',
+                features: ['Déblocage progressif', 'Première fois', 'Apprentissage guidé']
+              },
+              {
+                mode: 'revision' as GameMode,
+                title: '📚 Mode Révision',
+                description: 'Révisez toutes les périodes déjà vues',
+                color: '#27ae60',
+                features: ['Toutes périodes ouvertes', 'Améliorer ses scores', 'Répétition espacée']
+              },
+              {
+                mode: 'exam' as GameMode,
+                title: '📝 Mode Examen',
+                description: 'Testez-vous dans les conditions du Brevet',
+                color: '#e74c3c',
+                features: ['Questions aléatoires', 'Temps limité', 'Simulation Brevet']
+              },
+              {
+                mode: 'challenge' as GameMode,
+                title: '🏆 Mode Défi',
+                description: 'Défis quotidiens et questions difficiles',
+                color: '#f39c12',
+                features: ['Défis quotidiens', 'Questions expertes', 'Classement']
+              }
+            ].map(modeInfo => (
+              <button
+                key={modeInfo.mode}
+                onClick={() => handleModeSelect(modeInfo.mode)}
+                style={{
+                  background: `linear-gradient(135deg, ${modeInfo.color}, ${modeInfo.color}88)`,
+                  border: 'none',
+                  borderRadius: '20px',
+                  padding: '30px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  textAlign: 'left'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-5px)';
+                  e.currentTarget.style.boxShadow = `0 15px 35px ${modeInfo.color}44`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <h3 style={{ margin: '0 0 15px 0', fontSize: '1.4rem' }}>
+                  {modeInfo.title}
+                </h3>
+                <p style={{ margin: '0 0 15px 0', fontSize: '1rem', opacity: 0.9 }}>
+                  {modeInfo.description}
+                </p>
+                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem' }}>
+                  {modeInfo.features.map(feature => (
+                    <li key={feature} style={{ marginBottom: '5px' }}>{feature}</li>
+                  ))}
+                </ul>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const completedPercentage = (gameState.completedPeriods.length / periods.length) * 100;
   const averageScore = gameState.completedPeriods.length > 0 ? 
     Math.round(gameState.totalScore / gameState.completedPeriods.length) : 0;
+
+  const totalRevisions = Object.values(revisionStats).reduce((sum, stat) => sum + stat.attempts, 0);
 
   return (
     <div style={{ 
@@ -217,19 +378,22 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text'
           }}>
-            🕰️ Voyage dans l'Histoire
+            📚 Révisions Brevet Histoire
           </h1>
           <p style={{
             margin: '5px 0 0 0',
             fontSize: '1.1rem',
             color: '#bdc3c7'
           }}>
-            Salut {gameState.playerName} ! Explorez les grandes périodes du XXe siècle
+            {gameState.playerName} - Mode: {
+              gameMode === 'discovery' ? '🌟 Découverte' :
+              gameMode === 'revision' ? '📚 Révision' :
+              gameMode === 'exam' ? '📝 Examen' : '🏆 Défi'
+            }
           </p>
         </div>
         
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          {/* Stats display */}
           <div style={{
             background: 'rgba(52, 152, 219, 0.2)',
             borderRadius: '10px',
@@ -238,10 +402,10 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             minWidth: '80px'
           }}>
             <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-              {gameState.completedPeriods.length}/{periods.length}
+              {totalRevisions}
             </div>
             <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-              Terminées
+              Révisions
             </div>
           </div>
 
@@ -261,6 +425,22 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
           </div>
 
           <button
+            onClick={() => setShowModeSelector(true)}
+            style={{
+              backgroundColor: '#9b59b6',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '12px 20px',
+              color: 'white',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              marginRight: '10px'
+            }}
+          >
+            🎯 Changer de mode
+          </button>
+
+          <button
             onClick={handleShowDashboard}
             style={{
               backgroundColor: '#3498db',
@@ -270,8 +450,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               color: 'white',
               fontSize: '1rem',
               cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(52, 152, 219, 0.3)',
-              transition: 'all 0.3s ease'
+              boxShadow: '0 4px 15px rgba(52, 152, 219, 0.3)'
             }}
           >
             📊 Tableau de Bord
@@ -280,59 +459,61 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       </div>
 
       {/* Progress bar */}
-      <div style={{
-        background: 'rgba(0, 0, 0, 0.5)',
-        padding: '15px 20px',
-        color: 'white'
-      }}>
+      {gameMode === 'discovery' && (
         <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '10px'
-        }}>
-          <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
-            📈 Progression générale
-          </span>
-          <span style={{ fontSize: '1.1rem', color: '#3498db' }}>
-            {Math.round(completedPercentage)}%
-          </span>
-        </div>
-        <div style={{
-          backgroundColor: 'rgba(255, 255, 255, 0.2)',
-          borderRadius: '10px',
-          height: '12px',
-          overflow: 'hidden',
-          position: 'relative'
+          background: 'rgba(0, 0, 0, 0.5)',
+          padding: '15px 20px',
+          color: 'white'
         }}>
           <div style={{
-            backgroundColor: '#3498db',
-            height: '100%',
-            width: `${completedPercentage}%`,
-            transition: 'width 0.8s ease',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '10px'
+          }}>
+            <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
+              📈 Progression découverte
+            </span>
+            <span style={{ fontSize: '1.1rem', color: '#3498db' }}>
+              {Math.round(completedPercentage)}%
+            </span>
+          </div>
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.2)',
             borderRadius: '10px',
-            background: 'linear-gradient(90deg, #3498db, #2ecc71)'
-          }} />
+            height: '12px',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              backgroundColor: '#3498db',
+              height: '100%',
+              width: `${completedPercentage}%`,
+              transition: 'width 0.8s ease',
+              borderRadius: '10px',
+              background: 'linear-gradient(90deg, #3498db, #2ecc71)'
+            }} />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Timeline of Historical Periods */}
       <div style={{
         flex: 1,
         padding: '20px',
         overflowY: 'auto',
-        height: 'calc(100vh - 200px)'
+        height: gameMode === 'discovery' ? 'calc(100vh - 250px)' : 'calc(100vh - 200px)'
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
           gap: '20px',
-          maxWidth: '1200px',
+          maxWidth: '1400px',
           margin: '0 auto'
         }}>
           {periods.map((period, index) => {
-            const isLocked = !period.unlocked;
+            const isLocked = !period.unlocked && gameMode === 'discovery';
             const isCompleted = period.completed;
+            const periodStats = revisionStats[period.id];
             
             return (
               <div
@@ -353,8 +534,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                   opacity: isLocked ? 0.6 : 1,
                   boxShadow: isLocked 
                     ? '0 4px 15px rgba(0, 0, 0, 0.2)' 
-                    : `0 8px 25px ${period.color}33`,
-                  animation: isCompleted ? 'pulse 2s infinite' : 'none'
+                    : `0 8px 25px ${period.color}33`
                 }}
                 onMouseEnter={(e) => {
                   if (!isLocked) {
@@ -457,6 +637,43 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     {period.description}
                   </p>
 
+                  {/* Revision stats */}
+                  {periodStats && periodStats.attempts > 0 && (
+                    <div style={{
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      marginBottom: '15px'
+                    }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(3, 1fr)',
+                        gap: '10px',
+                        fontSize: '0.8rem',
+                        color: 'white'
+                      }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                            {periodStats.attempts}
+                          </div>
+                          <div>Tentatives</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#27ae60' }}>
+                            {periodStats.bestScore}/10
+                          </div>
+                          <div>Meilleur</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#3498db' }}>
+                            {periodStats.averageScore}/10
+                          </div>
+                          <div>Moyenne</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Score display */}
                   {isCompleted && period.score !== undefined && (
                     <div style={{
@@ -466,25 +683,30 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       display: 'inline-block',
                       color: 'white',
                       fontSize: '0.9rem',
-                      fontWeight: 'bold'
+                      fontWeight: 'bold',
+                      marginBottom: '10px'
                     }}>
-                      🏆 Score: {period.score}/10
+                      🏆 {gameMode === 'discovery' ? 'Score' : 'Meilleur'}: {period.score}/10
                     </div>
                   )}
 
                   {/* Call to action */}
-                  {!isLocked && !isCompleted && (
+                  {!isLocked && (
                     <div style={{
                       marginTop: '15px',
                       padding: '10px 15px',
-                      background: 'rgba(255, 255, 255, 0.2)',
+                      background: gameMode === 'discovery' && !isCompleted 
+                        ? 'rgba(52, 152, 219, 0.3)' 
+                        : 'rgba(39, 174, 96, 0.3)',
                       borderRadius: '8px',
                       color: 'white',
                       fontSize: '0.9rem',
                       fontWeight: 'bold',
                       textAlign: 'center'
                     }}>
-                      🎯 Cliquez pour commencer !
+                      {gameMode === 'discovery' && !isCompleted ? '🎯 Découvrir' :
+                       gameMode === 'revision' ? '📚 Réviser' :
+                       gameMode === 'exam' ? '📝 Tester' : '🏆 Défier'}
                     </div>
                   )}
 
@@ -498,7 +720,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       fontSize: '0.9rem',
                       textAlign: 'center'
                     }}>
-                      🔒 Terminez la période précédente pour débloquer
+                      🔒 Terminez la période précédente
                     </div>
                   )}
                 </div>
@@ -528,10 +750,10 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
         />
       )}
 
-      {/* Reset button (development/testing) */}
+      {/* Reset button */}
       <button
         onClick={() => {
-          localStorage.removeItem('history-game-progress');
+          localStorage.removeItem('history-revision-progress');
           window.location.reload();
         }}
         style={{
@@ -550,26 +772,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
           transition: 'all 0.3s ease',
           boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)'
         }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.transform = 'translateY(-2px)';
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.opacity = '0.7';
-          e.currentTarget.style.transform = 'translateY(0)';
-        }}
-        title="Recommencer le jeu (développement)"
       >
         🔄 Reset
       </button>
-
-      <style>{`
-        @keyframes pulse {
-          0% { box-shadow: 0 8px 25px ${periods.find(p => p.completed)?.color || '#27ae60'}33; }
-          50% { box-shadow: 0 12px 35px ${periods.find(p => p.completed)?.color || '#27ae60'}66; }
-          100% { box-shadow: 0 8px 25px ${periods.find(p => p.completed)?.color || '#27ae60'}33; }
-        }
-      `}</style>
     </div>
   );
 };
