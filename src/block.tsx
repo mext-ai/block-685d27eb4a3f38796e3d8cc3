@@ -35,6 +35,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   const [showQuiz, setShowQuiz] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
+  const [sceneLoaded, setSceneLoaded] = useState(false);
 
   // Send completion event for tracking
   const sendCompletionEvent = (completed: boolean, score?: number, maxScore?: number) => {
@@ -58,6 +59,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
 
   // Handle avatar creation
   const handleAvatarComplete = (name: string, color: string) => {
+    console.log('Avatar completed:', name, color);
     setGameState(prev => ({
       ...prev,
       playerName: name,
@@ -65,12 +67,18 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     }));
     setShowAvatarCustomization(false);
     
+    // Give some time for the scene to initialize
+    setTimeout(() => {
+      setSceneLoaded(true);
+    }, 100);
+    
     // Send initial engagement event
     sendCompletionEvent(false, 0, 10);
   };
 
   // Handle period selection
   const handlePeriodClick = (periodId: string) => {
+    console.log('Period clicked:', periodId);
     const period = periods.find(p => p.id === periodId);
     if (!period || !period.unlocked) return;
 
@@ -164,6 +172,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
         setPeriods(parsed.periods);
         if (parsed.gameState.playerName) {
           setShowAvatarCustomization(false);
+          setSceneLoaded(true);
         }
       } catch (error) {
         console.error('Error loading saved progress:', error);
@@ -186,6 +195,40 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     return <AvatarCustomization onComplete={handleAvatarComplete} />;
   }
 
+  // Show loading state if scene not ready
+  if (!sceneLoaded) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '100vh',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: 'white',
+        fontFamily: 'Arial, sans-serif'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: '3rem',
+            marginBottom: '20px',
+            animation: 'spin 2s linear infinite'
+          }}>
+            ⏰
+          </div>
+          <h2>Chargement du voyage temporel...</h2>
+          <p>Préparation de votre aventure historique</p>
+        </div>
+        <style>{`
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   return (
     <div style={{ 
       width: '100%', 
@@ -193,15 +236,32 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       overflow: 'hidden',
       fontFamily: 'Arial, sans-serif'
     }}>
-      {/* Main 3D Scene */}
-      <Scene3D
-        periods={periods}
-        playerName={gameState.playerName}
-        avatarColor={gameState.avatarColor}
-        selectedPeriod={selectedPeriod}
-        onPeriodClick={handlePeriodClick}
-        onShowDashboard={handleShowDashboard}
-      />
+      {/* Debug info */}
+      <div style={{
+        position: 'fixed',
+        top: '10px',
+        left: '10px',
+        background: 'rgba(0,0,0,0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        fontSize: '12px',
+        zIndex: 1000
+      }}>
+        Player: {gameState.playerName} | Periods: {periods.length} | Scene: {sceneLoaded ? 'Loaded' : 'Loading'}
+      </div>
+
+      {/* Try to render 3D Scene with error boundary */}
+      <ErrorBoundary>
+        <Scene3D
+          periods={periods}
+          playerName={gameState.playerName}
+          avatarColor={gameState.avatarColor}
+          selectedPeriod={selectedPeriod}
+          onPeriodClick={handlePeriodClick}
+          onShowDashboard={handleShowDashboard}
+        />
+      </ErrorBoundary>
 
       {/* Quiz Modal */}
       {showQuiz && selectedPeriod && (
@@ -253,5 +313,66 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     </div>
   );
 };
+
+// Simple Error Boundary
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error?: Error }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          width: '100%',
+          height: '100vh',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          fontFamily: 'Arial, sans-serif'
+        }}>
+          <div style={{ textAlign: 'center', maxWidth: '600px', padding: '20px' }}>
+            <h2>⚠️ Erreur de chargement de la scène 3D</h2>
+            <p>Il semble y avoir un problème avec le rendu 3D. Voici une version simplifiée :</p>
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                backgroundColor: '#3498db',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '15px 30px',
+                color: 'white',
+                fontSize: '1rem',
+                cursor: 'pointer',
+                marginTop: '20px'
+              }}
+            >
+              🔄 Recharger
+            </button>
+            <div style={{
+              marginTop: '20px',
+              fontSize: '0.9rem',
+              opacity: 0.8
+            }}>
+              Erreur: {this.state.error?.message}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default Block;
