@@ -24,6 +24,7 @@ interface Level {
   completed: boolean;
   score?: number;
   stars: number;
+  passed?: boolean; // Nouveau champ pour indiquer si le niveau est réussi
 }
 
 interface PeriodProgress {
@@ -73,6 +74,8 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     lastScore: number;
     averageScore: number;
     weaknesses: string[];
+    bestPercentage?: number;
+    passed?: boolean;
   }}>({});
 
   // Initialiser les niveaux pour chaque période
@@ -88,7 +91,8 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
           difficulty: i <= 3 ? 'Facile' : i <= 6 ? 'Moyen' : i <= 8 ? 'Difficile' : 'Expert',
           unlocked: period.id === 'ww1' && i === 1, // Seul le niveau 1 de WWI est débloqué au début
           completed: false,
-          stars: 0
+          stars: 0,
+          passed: false
         });
       }
       
@@ -118,7 +122,10 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
         levelsCompleted: Object.values(periodProgress).reduce((sum, period) => 
           sum + period.levels.filter(level => level.completed).length, 0
         ),
-        totalLevels: Object.values(periodProgress).reduce((sum, period) => sum + period.levels.length, 0)
+        totalLevels: Object.values(periodProgress).reduce((sum, period) => sum + period.levels.length, 0),
+        levelsPassed: Object.values(periodProgress).reduce((sum, period) => 
+          sum + period.levels.filter(level => level.passed).length, 0
+        )
       }
     };
 
@@ -153,13 +160,13 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
         unlockedPeriods: periods.map(p => p.id)
       }));
       
-      // Débloquer tous les niveaux complétés
+      // Débloquer tous les niveaux complétés ou réussis
       setPeriodProgress(prev => {
         const updated = { ...prev };
         Object.keys(updated).forEach(periodId => {
           updated[periodId].levels = updated[periodId].levels.map(level => ({
             ...level,
-            unlocked: level.completed || level.level === 1
+            unlocked: level.completed || level.passed || level.level === 1
           }));
         });
         return updated;
@@ -183,9 +190,11 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     setShowClassicQuiz(true);
   };
 
-  // Handle Classic Quiz completion
-  const handleClassicQuizComplete = (score: number, stars: number, mistakes: string[] = []) => {
+  // Handle Classic Quiz completion avec nouveau système
+  const handleClassicQuizComplete = (score: number, stars: number, mistakes: string[] = [], passed: boolean) => {
     if (!selectedPeriod || !selectedLevel) return;
+
+    const percentage = (score / 6) * 100; // 6 questions par niveau
 
     // Mettre à jour les stats de révision
     const levelKey = `${selectedPeriod}-${selectedLevel}`;
@@ -194,7 +203,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       bestScore: 0,
       lastScore: 0,
       averageScore: 0,
-      weaknesses: []
+      weaknesses: [],
+      bestPercentage: 0,
+      passed: false
     };
 
     const newAttempts = currentStats.attempts + 1;
@@ -206,7 +217,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       bestScore: Math.max(currentStats.bestScore, score),
       lastScore: score,
       averageScore: Math.round(newAverageScore),
-      weaknesses: [...new Set([...currentStats.weaknesses, ...mistakes])]
+      weaknesses: [...new Set([...currentStats.weaknesses, ...mistakes])],
+      bestPercentage: Math.max(currentStats.bestPercentage || 0, percentage),
+      passed: currentStats.passed || passed // Une fois réussi, reste réussi
     };
 
     setRevisionStats(prev => ({
@@ -220,21 +233,26 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       const currentLevel = updated[selectedPeriod].levels.find(l => l.level === selectedLevel);
       
       if (currentLevel) {
+        // Mettre à jour les infos du niveau
         currentLevel.completed = true;
         currentLevel.score = Math.max(currentLevel.score || 0, score);
         currentLevel.stars = Math.max(currentLevel.stars, stars);
+        currentLevel.passed = currentLevel.passed || passed; // Une fois réussi, reste réussi
         
-        // Débloquer le niveau suivant
-        if (selectedLevel < 10) {
+        // Débloquer le niveau suivant SEULEMENT si ce niveau est réussi (≥60%)
+        if (passed && selectedLevel < 10) {
           const nextLevel = updated[selectedPeriod].levels.find(l => l.level === selectedLevel + 1);
           if (nextLevel) {
             nextLevel.unlocked = true;
           }
         }
         
-        // Si tous les niveaux sont complétés, débloquer la période suivante
-        const allLevelsCompleted = updated[selectedPeriod].levels.every(l => l.completed);
-        if (allLevelsCompleted && gameMode === 'discovery') {
+        // Vérifier si tous les niveaux sont réussis (pas seulement complétés)
+        const allLevelsPassed = updated[selectedPeriod].levels.every(l => l.passed || l.level > 10);
+        const passedLevels = updated[selectedPeriod].levels.filter(l => l.passed).length;
+        
+        // Débloquer la période suivante seulement si au moins 8 niveaux sur 10 sont réussis
+        if (passedLevels >= 8 && gameMode === 'discovery') {
           const periodOrder = ['ww1', 'totalitarian', 'ww2', 'coldwar', 'decolonization', 'fifth-republic', 'europe-1989'];
           const currentIndex = periodOrder.indexOf(selectedPeriod);
           
@@ -254,14 +272,14 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             
             setGameState(prev => ({
               ...prev,
-              unlockedPeriods: [...prev.unlockedPeriods, nextPeriodId]
+              unlockedPeriods: [...prev.unlockedPeriods.filter(id => id !== nextPeriodId), nextPeriodId]
             }));
           }
         }
         
-        // Calculer le progrès global de la période
-        const completedLevels = updated[selectedPeriod].levels.filter(l => l.completed).length;
-        updated[selectedPeriod].overallProgress = (completedLevels / 10) * 100;
+        // Calculer le progrès global de la période (basé sur les niveaux réussis)
+        const passedLevelsCount = updated[selectedPeriod].levels.filter(l => l.passed).length;
+        updated[selectedPeriod].overallProgress = (passedLevelsCount / 10) * 100;
       }
       
       return updated;
@@ -272,13 +290,13 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     setSelectedLevel(null);
 
     // Calculer le progrès global
-    const totalLevelsCompleted = Object.values(periodProgress).reduce((sum, period) => 
-      sum + period.levels.filter(level => level.completed).length, 0
+    const totalLevelsPassed = Object.values(periodProgress).reduce((sum, period) => 
+      sum + period.levels.filter(level => level.passed).length, 0
     );
     const totalLevels = Object.values(periodProgress).reduce((sum, period) => sum + period.levels.length, 0);
-    const overallProgress = totalLevels > 0 ? (totalLevelsCompleted / totalLevels) * 100 : 0;
+    const overallProgress = totalLevels > 0 ? (totalLevelsPassed / totalLevels) * 100 : 0;
     
-    sendCompletionEvent(overallProgress === 100, score, 6);
+    sendCompletionEvent(overallProgress >= 80, score, 6); // 80% des niveaux réussis pour complétion
   };
 
   // Handle quiz completion (ancien système)
@@ -467,28 +485,28 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                 title: '🌟 Mode Découverte',
                 description: 'Questions manuelles classiques, niveau par niveau',
                 color: '#3498db',
-                features: ['10 niveaux par période', 'Questions créées manuellement', 'Difficulté progressive']
+                features: ['10 niveaux par période', 'Questions créées manuellement', 'Minimum 60% requis', 'Difficulté progressive']
               },
               {
                 mode: 'revision' as GameMode,
                 title: '📚 Mode Révision',
                 description: 'Révisez avec des questions classiques',
                 color: '#27ae60',
-                features: ['Niveaux complétés ouverts', 'Questions toujours identiques', 'Révision solide']
+                features: ['Niveaux réussis ouverts', 'Questions toujours identiques', 'Système d\'étoiles', 'Révision solide']
               },
               {
                 mode: 'exam' as GameMode,
                 title: '📝 Mode Examen',
                 description: 'Simulation Brevet avec questions types',
                 color: '#e74c3c',
-                features: ['Questions niveau Brevet', 'Temps limité', 'Préparation complète']
+                features: ['Questions niveau Brevet', 'Temps limité', 'Préparation complète', 'Seuil de réussite']
               },
               {
                 mode: 'challenge' as GameMode,
                 title: '🏆 Mode Défi',
                 description: 'Défis avec questions avancées',
                 color: '#f39c12',
-                features: ['Questions complexes', 'Niveau expert', 'Challenges quotidiens']
+                features: ['Questions complexes', 'Niveau expert', 'Challenges quotidiens', 'Haute difficulté']
               }
             ].map(modeInfo => (
               <button
@@ -541,15 +559,15 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               color: '#3498db',
               fontSize: '1.2rem'
             }}>
-              📚 Questions Classiques
+              📚 Nouveau Système de Notation
             </h4>
             <p style={{ 
               margin: 0, 
               color: '#bdc3c7',
               fontSize: '0.95rem'
             }}>
-              Toutes les questions sont créées manuellement par des experts pour une préparation optimale. 
-              Chaque niveau contient 6 questions soigneusement sélectionnées !
+              Minimum 60% pour passer au niveau suivant • 60-69% ⭐ • 70-89% ⭐⭐ • 90-100% ⭐⭐⭐
+              <br />8 niveaux réussis sur 10 débloqueront la période suivante !
             </p>
           </div>
         </div>
@@ -597,6 +615,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   const totalRevisions = Object.values(revisionStats).reduce((sum, stat) => sum + stat.attempts, 0);
   const totalLevelsCompleted = Object.values(periodProgress).reduce((sum, period) => 
     sum + period.levels.filter(level => level.completed).length, 0
+  );
+  const totalLevelsPassed = Object.values(periodProgress).reduce((sum, period) => 
+    sum + period.levels.filter(level => level.passed).length, 0
   );
 
   return (
@@ -651,10 +672,10 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             minWidth: '80px'
           }}>
             <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-              {totalLevelsCompleted}
+              {totalLevelsPassed}
             </div>
             <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-              Niveaux
+              Réussis
             </div>
           </div>
 
@@ -724,7 +745,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               📚 Progression découverte classique
             </span>
             <span style={{ fontSize: '1.1rem', color: '#3498db' }}>
-              {totalLevelsCompleted}/70 niveaux
+              {totalLevelsPassed}/70 niveaux réussis
             </span>
           </div>
           <div style={{
@@ -736,11 +757,19 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             <div style={{
               backgroundColor: '#3498db',
               height: '100%',
-              width: `${(totalLevelsCompleted / 70) * 100}%`,
+              width: `${(totalLevelsPassed / 70) * 100}%`,
               transition: 'width 0.8s ease',
               borderRadius: '10px',
               background: 'linear-gradient(90deg, #3498db, #2ecc71)'
             }} />
+          </div>
+          <div style={{
+            fontSize: '0.9rem',
+            opacity: 0.8,
+            marginTop: '5px',
+            textAlign: 'center'
+          }}>
+            Minimum 60% requis pour passer au niveau suivant • 8 niveaux réussis débloquent la période suivante
           </div>
         </div>
       )}
@@ -750,7 +779,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
         flex: 1,
         padding: '20px',
         overflowY: 'auto',
-        height: gameMode === 'discovery' ? 'calc(100vh - 250px)' : 'calc(100vh - 200px)'
+        height: gameMode === 'discovery' ? 'calc(100vh - 290px)' : 'calc(100vh - 200px)'
       }}>
         <div style={{
           display: 'grid',
@@ -763,6 +792,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             const isLocked = !period.unlocked && gameMode === 'discovery';
             const periodLevels = periodProgress[period.id]?.levels || [];
             const completedLevels = periodLevels.filter(level => level.completed).length;
+            const passedLevels = periodLevels.filter(level => level.passed).length;
             const totalStars = periodLevels.reduce((sum, level) => sum + level.stars, 0);
             const maxStars = periodLevels.length * 3;
             const overallProgress = periodProgress[period.id]?.overallProgress || 0;
@@ -806,7 +836,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                 <div style={{
                   position: 'absolute',
                   top: '15px',
-                  right: completedLevels === 10 ? '60px' : '15px',
+                  right: passedLevels >= 8 ? '60px' : '15px',
                   background: 'linear-gradient(45deg, #27ae60, #2ecc71)',
                   borderRadius: '15px',
                   padding: '5px 10px',
@@ -818,13 +848,13 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                   📚 Classique
                 </div>
 
-                {/* Completion badge */}
-                {completedLevels === 10 && (
+                {/* Mastery badge */}
+                {passedLevels >= 8 && (
                   <div style={{
                     position: 'absolute',
                     top: '15px',
                     right: '15px',
-                    background: '#27ae60',
+                    background: '#f1c40f',
                     borderRadius: '50%',
                     width: '40px',
                     height: '40px',
@@ -832,7 +862,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '1.2rem',
-                    boxShadow: '0 4px 15px rgba(39, 174, 96, 0.4)'
+                    boxShadow: '0 4px 15px rgba(241, 196, 15, 0.4)'
                   }}>
                     🏆
                   </div>
@@ -922,7 +952,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     </div>
                   )}
 
-                  {/* Level progress */}
+                  {/* Level progress avec distinction réussis/complétés */}
                   <div style={{
                     background: 'rgba(0, 0, 0, 0.3)',
                     borderRadius: '10px',
@@ -936,10 +966,20 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       marginBottom: '8px'
                     }}>
                       <span style={{ color: 'white', fontSize: '0.9rem' }}>
-                        📚 Niveaux: {completedLevels}/10
+                        ✅ Réussis: {passedLevels}/10
                       </span>
                       <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>
                         ⭐ {totalStars}/{maxStars}
+                      </span>
+                    </div>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '8px'
+                    }}>
+                      <span style={{ color: '#bdc3c7', fontSize: '0.8rem' }}>
+                        📚 Complétés: {completedLevels}/10
                       </span>
                     </div>
                     <div style={{
@@ -963,7 +1003,8 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     padding: '12px 15px',
                     background: isLocked ? 'rgba(127, 140, 141, 0.3)' :
                                !isThemeReady ? 'rgba(241, 196, 15, 0.3)' :
-                               completedLevels > 0 ? 'rgba(39, 174, 96, 0.3)' : 
+                               passedLevels >= 8 ? 'rgba(241, 196, 15, 0.3)' :
+                               passedLevels > 0 ? 'rgba(39, 174, 96, 0.3)' : 
                                'rgba(52, 152, 219, 0.3)',
                     borderRadius: '10px',
                     color: 'white',
@@ -973,8 +1014,8 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                   }}>
                     {isLocked ? '🔒 Période verrouillée' :
                      !isThemeReady ? '🚧 En préparation' :
-                     completedLevels === 10 ? '🏆 Période maîtrisée' :
-                     completedLevels > 0 ? '📚 Continuer' : '📚 Commencer'}
+                     passedLevels >= 8 ? '🏆 Période maîtrisée' :
+                     passedLevels > 0 ? '📚 Continuer' : '📚 Commencer'}
                   </div>
 
                   {isLocked && (
@@ -987,7 +1028,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       fontSize: '0.85rem',
                       textAlign: 'center'
                     }}>
-                      Terminez la période précédente pour débloquer
+                      Réussissez 8 niveaux de la période précédente
                     </div>
                   )}
                 </div>
