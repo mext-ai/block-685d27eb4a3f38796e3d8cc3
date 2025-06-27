@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import AvatarCustomization from './AvatarCustomization';
 import QuizComponent from './QuizComponent';
 import LevelSelector from './LevelSelector';
-import AIQuizLoader from './AIQuizLoader';
+import ClassicQuizComponent from './ClassicQuizComponent';
 import ProgressDashboard from './ProgressDashboard';
 import { historicalPeriods, quizQuestions } from './gameData';
+import { getAvailableThemes, isThemeComplete } from './classicQuestions';
 import { GameState, HistoricalPeriod } from './types';
 
 interface BlockProps {
@@ -58,7 +59,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   const [showAvatarCustomization, setShowAvatarCustomization] = useState(true);
   const [showQuiz, setShowQuiz] = useState(false);
   const [showLevelSelector, setShowLevelSelector] = useState(false);
-  const [showAIQuiz, setShowAIQuiz] = useState(false);
+  const [showClassicQuiz, setShowClassicQuiz] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
@@ -179,11 +180,11 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
   const handleLevelSelect = (level: number) => {
     setSelectedLevel(level);
     setShowLevelSelector(false);
-    setShowAIQuiz(true);
+    setShowClassicQuiz(true);
   };
 
-  // Handle AI quiz completion
-  const handleAIQuizComplete = (score: number, stars: number, mistakes: string[] = []) => {
+  // Handle Classic Quiz completion
+  const handleClassicQuizComplete = (score: number, stars: number, mistakes: string[] = []) => {
     if (!selectedPeriod || !selectedLevel) return;
 
     // Mettre à jour les stats de révision
@@ -266,7 +267,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
       return updated;
     });
 
-    setShowAIQuiz(false);
+    setShowClassicQuiz(false);
     setShowLevelSelector(true);
     setSelectedLevel(null);
 
@@ -368,8 +369,8 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     setSelectedPeriod(null);
   };
 
-  const handleAIQuizClose = () => {
-    setShowAIQuiz(false);
+  const handleClassicQuizClose = () => {
+    setShowClassicQuiz(false);
     setSelectedLevel(null);
   };
 
@@ -464,30 +465,30 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               {
                 mode: 'discovery' as GameMode,
                 title: '🌟 Mode Découverte',
-                description: 'Quiz IA adaptatifs, niveau par niveau',
+                description: 'Questions manuelles classiques, niveau par niveau',
                 color: '#3498db',
-                features: ['10 niveaux par période', 'Questions générées par IA', 'Difficulté progressive']
+                features: ['10 niveaux par période', 'Questions créées manuellement', 'Difficulté progressive']
               },
               {
                 mode: 'revision' as GameMode,
                 title: '📚 Mode Révision',
-                description: 'Révisez avec des questions IA personnalisées',
+                description: 'Révisez avec des questions classiques',
                 color: '#27ae60',
-                features: ['Niveaux complétés ouverts', 'IA s\'adapte à vos lacunes', 'Questions toujours différentes']
+                features: ['Niveaux complétés ouverts', 'Questions toujours identiques', 'Révision solide']
               },
               {
                 mode: 'exam' as GameMode,
                 title: '📝 Mode Examen',
-                description: 'Simulation Brevet avec IA experte',
+                description: 'Simulation Brevet avec questions types',
                 color: '#e74c3c',
-                features: ['Questions niveau Brevet', 'Temps limité', 'IA analyse vos erreurs']
+                features: ['Questions niveau Brevet', 'Temps limité', 'Préparation complète']
               },
               {
                 mode: 'challenge' as GameMode,
                 title: '🏆 Mode Défi',
-                description: 'Défis quotidiens générés par IA',
+                description: 'Défis avec questions avancées',
                 color: '#f39c12',
-                features: ['Défis quotidiens', 'IA ultra-experte', 'Questions inédites']
+                features: ['Questions complexes', 'Niveau expert', 'Challenges quotidiens']
               }
             ].map(modeInfo => (
               <button
@@ -540,15 +541,15 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               color: '#3498db',
               fontSize: '1.2rem'
             }}>
-              🤖 Powered by AI
+              📚 Questions Classiques
             </h4>
             <p style={{ 
               margin: 0, 
               color: '#bdc3c7',
               fontSize: '0.95rem'
             }}>
-              Toutes les questions sont générées intelligemment par IA selon votre niveau et vos lacunes. 
-              Chaque quiz est unique et personnalisé !
+              Toutes les questions sont créées manuellement par des experts pour une préparation optimale. 
+              Chaque niveau contient 6 questions soigneusement sélectionnées !
             </p>
           </div>
         </div>
@@ -573,18 +574,18 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
     );
   }
 
-  // AI Quiz
-  if (showAIQuiz && selectedPeriod && selectedLevel) {
+  // Classic Quiz
+  if (showClassicQuiz && selectedPeriod && selectedLevel) {
     const period = periods.find(p => p.id === selectedPeriod);
     
     return (
-      <AIQuizLoader
-        periodId={selectedPeriod}
-        periodName={period?.name || ''}
-        periodColor={period?.color || '#3498db'}
+      <ClassicQuizComponent
+        themeId={selectedPeriod}
+        themeName={period?.name || ''}
+        themeColor={period?.color || '#3498db'}
         level={selectedLevel}
-        onComplete={handleAIQuizComplete}
-        onClose={handleAIQuizClose}
+        onComplete={handleClassicQuizComplete}
+        onClose={handleClassicQuizClose}
       />
     );
   }
@@ -626,7 +627,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             WebkitTextFillColor: 'transparent',
             backgroundClip: 'text'
           }}>
-            🤖 Révisions Brevet Histoire IA
+            📚 Révisions Brevet Histoire Classique
           </h1>
           <p style={{
             margin: '5px 0 0 0',
@@ -634,9 +635,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             color: '#bdc3c7'
           }}>
             {gameState.playerName} - Mode: {
-              gameMode === 'discovery' ? '🌟 Découverte IA' :
-              gameMode === 'revision' ? '📚 Révision IA' :
-              gameMode === 'exam' ? '📝 Examen IA' : '🏆 Défi IA'
+              gameMode === 'discovery' ? '🌟 Découverte Classique' :
+              gameMode === 'revision' ? '📚 Révision Classique' :
+              gameMode === 'exam' ? '📝 Examen Classique' : '🏆 Défi Classique'
             }
           </p>
         </div>
@@ -653,7 +654,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               {totalLevelsCompleted}
             </div>
             <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-              Niveaux IA
+              Niveaux
             </div>
           </div>
 
@@ -668,7 +669,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
               {totalRevisions}
             </div>
             <div style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-              Quiz IA
+              Quiz
             </div>
           </div>
 
@@ -720,10 +721,10 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             marginBottom: '10px'
           }}>
             <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>
-              🤖 Progression découverte IA
+              📚 Progression découverte classique
             </span>
             <span style={{ fontSize: '1.1rem', color: '#3498db' }}>
-              {totalLevelsCompleted}/70 niveaux IA
+              {totalLevelsCompleted}/70 niveaux
             </span>
           </div>
           <div style={{
@@ -765,6 +766,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
             const totalStars = periodLevels.reduce((sum, level) => sum + level.stars, 0);
             const maxStars = periodLevels.length * 3;
             const overallProgress = periodProgress[period.id]?.overallProgress || 0;
+            const isThemeReady = isThemeComplete(period.id);
             
             return (
               <div
@@ -800,20 +802,20 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                   }
                 }}
               >
-                {/* AI Badge */}
+                {/* Classic Badge */}
                 <div style={{
                   position: 'absolute',
                   top: '15px',
                   right: completedLevels === 10 ? '60px' : '15px',
-                  background: 'linear-gradient(45deg, #9b59b6, #3498db)',
+                  background: 'linear-gradient(45deg, #27ae60, #2ecc71)',
                   borderRadius: '15px',
                   padding: '5px 10px',
                   fontSize: '0.8rem',
                   fontWeight: 'bold',
                   color: 'white',
-                  boxShadow: '0 4px 15px rgba(155, 89, 182, 0.4)'
+                  boxShadow: '0 4px 15px rgba(39, 174, 96, 0.4)'
                 }}>
-                  🤖 IA
+                  📚 Classique
                 </div>
 
                 {/* Completion badge */}
@@ -904,6 +906,22 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     {period.description}
                   </p>
 
+                  {/* Theme completion status */}
+                  {!isThemeReady && (
+                    <div style={{
+                      background: 'rgba(241, 196, 15, 0.2)',
+                      border: '1px solid rgba(241, 196, 15, 0.4)',
+                      borderRadius: '8px',
+                      padding: '8px',
+                      marginBottom: '15px',
+                      fontSize: '0.85rem',
+                      color: '#f1c40f',
+                      textAlign: 'center'
+                    }}>
+                      🚧 Questions en cours d'ajout
+                    </div>
+                  )}
+
                   {/* Level progress */}
                   <div style={{
                     background: 'rgba(0, 0, 0, 0.3)',
@@ -918,7 +936,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       marginBottom: '8px'
                     }}>
                       <span style={{ color: 'white', fontSize: '0.9rem' }}>
-                        🤖 Niveaux IA: {completedLevels}/10
+                        📚 Niveaux: {completedLevels}/10
                       </span>
                       <span style={{ color: '#f39c12', fontSize: '0.9rem' }}>
                         ⭐ {totalStars}/{maxStars}
@@ -931,7 +949,7 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                       overflow: 'hidden'
                     }}>
                       <div style={{
-                        background: 'linear-gradient(90deg, #9b59b6, #3498db)',
+                        background: 'linear-gradient(90deg, #27ae60, #2ecc71)',
                         height: '100%',
                         width: `${overallProgress}%`,
                         transition: 'width 0.3s ease',
@@ -944,8 +962,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                   <div style={{
                     padding: '12px 15px',
                     background: isLocked ? 'rgba(127, 140, 141, 0.3)' :
+                               !isThemeReady ? 'rgba(241, 196, 15, 0.3)' :
                                completedLevels > 0 ? 'rgba(39, 174, 96, 0.3)' : 
-                               'rgba(155, 89, 182, 0.3)',
+                               'rgba(52, 152, 219, 0.3)',
                     borderRadius: '10px',
                     color: 'white',
                     fontSize: '1rem',
@@ -953,8 +972,9 @@ const Block: React.FC<BlockProps> = ({ title, description }) => {
                     textAlign: 'center'
                   }}>
                     {isLocked ? '🔒 Période verrouillée' :
+                     !isThemeReady ? '🚧 En préparation' :
                      completedLevels === 10 ? '🏆 Période maîtrisée' :
-                     completedLevels > 0 ? '🤖 Continuer avec IA' : '🤖 Commencer avec IA'}
+                     completedLevels > 0 ? '📚 Continuer' : '📚 Commencer'}
                   </div>
 
                   {isLocked && (
